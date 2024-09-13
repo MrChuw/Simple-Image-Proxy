@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/styles.css') }}">
+    <script src="https://unpkg.com/isotope-layout@3/dist/isotope.pkgd.min.js"></script>
+    <script src="{{ url_for('static', path='js/fit-columns.js') }}"></script>
+    <script src="{{ url_for('static', path='js/fetchLinks.js') }}"></script>
+    <script src="{{ url_for('static', path='js/organize.js') }}"></script>
+    <script src="{{ url_for('static', path='js/imagesloaded.js') }}"></script>
+    <link rel="icon" href="{{ url_for('static', path='favicon.gif') }}" type="image/gif">
+    
+    <title>Image Gallery Streaming</title>
+</head>
+<body>
+    <h1>Image Gallery</h1>
+    <div class="grid" id="gallery">
+        <div class="grid-sizer"></div>
+        <!-- As imagens serão inseridas aqui -->
+    </div>
+
+    <script>
+        window.onload = async function() {
+            await fetchLinks();
+            await organizeImages();
+        };
+        
+    </script>
+</body>
+</html>

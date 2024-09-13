@@ -1,0 +1,26 @@
+.dropdown {
+    margin-bottom: 10px;
+}
+.dropdown summary {
+    cursor: pointer;
+    padding: 10px;
+    background-color: #f1f1f1;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+.dropdown ul {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+    display: none;
+}
+.dropdown[open] ul {
+    display: block;
+}
+.dropdown ul ul {
+    padding-left: 20px;
+}
+.dropdown a {
+    text-decoration: none;
+    color: #333;
+}

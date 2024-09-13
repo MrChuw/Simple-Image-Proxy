@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/index.css') }}">
+    <link rel="icon" href="{{ url_for('static', path='favicon.gif') }}" type="image/gif">
+    <title>Gallery Index</title>
+</head>
+<body>
+    <h1>Paths</h1>
+    {% for folder in paths %}
+    <details class="dropdown">
+        <summary role="button">
+            <a class="button">{{ folder }}</a>
+        </summary>
+        <ul>
+            <li>
+                <a href="/path/{{ folder }}">{{ folder }}</a>
+                <ul>
+                    {% for img_path in paths[folder] %}
+                    <li><a href="/path/{{ folder }}/{{ img_path }}">{{ img_path }}</a></li>
+                    {% endfor %}
+                </ul>
+            </li>
+        </ul>
+    </details>
+    {% endfor %}
+</body>
+</html>

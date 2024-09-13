@@ -1,0 +1,17 @@
+
+paths = [
+    "/path/to/folder/with/images/1",
+    "/path/to/folder/with/images/2",
+    "/path/to/folder/with/images/3",
+    "/path/to/folder/with/images/4",
+]
+
+
+
+
+root_paths = [
+    "/path/to/folder/with/images/"
+]
+
+
+
