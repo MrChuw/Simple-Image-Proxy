@@ -101,8 +101,6 @@ async def get_files(request: Request, folder_str: str, path_str: str):
         raise HTTPException(status_code=404, detail="File or folder deleted since last time I checked.")
 
 
-
-
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=4324, log_level="info", reload=True)
-    # uvicorn.run("main:app", host="0.0.0.0", port=4324, log_level="info", workers=1)
+    # uvicorn.run("main:app", host="0.0.0.0", port=4324, log_level="info", reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=4324, log_level="info", workers=4)
