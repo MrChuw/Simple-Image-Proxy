@@ -1,23 +1,94 @@
+
 import asyncio
 import pathlib
-
 import toml
 import filetype
-from watchdog.events import FileSystemEventHandler
-from watchdog.observers import Observer
+import hashlib
+
+pathtype = dict[str, dict[str, pathlib.Path]]
 
 
 class State:
-    def __init__(self):
-        self.paths: dict[str, dict[str, list[pathlib.Path | str]]]  = {}
-        self.observers = []
+    def __init__(self, cooldown_time: float):
+        self.paths: pathtype = {}
+        self.config_hash: str = ""
+
+        self.cooldown_time = cooldown_time
+        self._last_call_time = None
+
+    async def _cooldown(self):
+        if self._last_call_time is not None:
+            elapsed_time = asyncio.get_event_loop().time() - self._last_call_time
+            if elapsed_time < self.cooldown_time:
+                await asyncio.sleep(self.cooldown_time - elapsed_time)
+        self._last_call_time = asyncio.get_event_loop().time()
+
+    async def call_function_with_cooldown(self, func, *args, **kwargs):
+        await self._cooldown()
+        return await func(*args, **kwargs)
+
+
+async def generate_paths(path_list: list[str]):
+    file_dict: pathtype = {}
+
+    for path in path_list:
+        root_path = pathlib.Path(path)
+        if root_path.stem not in file_dict and not root_path.is_file():
+            file_dict[root_path.stem] = {}
+        if not root_path.is_file():
+            for file_path in root_path.rglob('*'):
+                if file_path.is_file():
+                    file_dict[root_path.stem][str(file_path.relative_to(root_path))] = file_path
+        else:
+            if root_path.parent.stem not in file_dict:
+                file_dict[root_path.parent.stem] = {}
+            file_dict[root_path.parent.stem][str(root_path.relative_to(root_path.parent))] = root_path
+    return file_dict
+
+
+async def force_update(state: State, config_path: pathlib.Path):
+    config = toml.load(config_path)
+    state.paths = await generate_paths(config.get("paths"))
+    if config.get("root_paths"):
+        await generate_root_paths(config.get("root_paths"), state)
+
+
+async def config_observer(logger, config: pathlib.Path, state):
+    state.config_hash = hashlib.md5(config.open('rb').read()).hexdigest()
+    logger.info(f"Initial config hash: {state.config_hash}")
+    while True:
+        new_hash = hashlib.md5(config.open('rb').read()).hexdigest()
+        if state.config_hash != new_hash:
+            logger.info(f"Config hash updated: {new_hash}")
+            state.config_hash = new_hash
+            await force_update(state, config)
+        await asyncio.sleep(10)
+
+
+async def cleanup_routine(logger, config_path: pathlib.Path, state: State):
+    logger.info("Start path cleaner.")
+
+    while True:
+        await asyncio.sleep(60*30)
+        logger.info("Updating paths.")
+
+        config = toml.load(config_path)
+
+        state.paths = await generate_paths(config.get("paths"))
+        if config.get("root_paths"):
+            await generate_root_paths(config.get("root_paths"), state)
+
+
+async def start_paths(config: pathlib.Path, state: State):
+    config = toml.load(config)
+    state.paths = await generate_paths(config.get("paths"))
+    if config.get("root_paths"):
+        await generate_root_paths(config.get("root_paths"), state)
 
 
 def process_file(file_path):
     kind = filetype.guess(file_path)
-    if kind is None:
-        return None
-    return str(kind.mime)
+    return None if kind is None else str(kind.mime)
 
 
 async def process_files_in_thread(file_path):
@@ -25,90 +96,11 @@ async def process_files_in_thread(file_path):
     return await loop.run_in_executor(None, process_file, file_path)
 
 
-async def generate_paths(path_list: list[str]) -> dict[str, dict[str, dict[pathlib.Path, str]]]:
-    file_dict = {}
-    tasks = []
-
-    for path in path_list:
-        root_path = pathlib.Path(path)
-        if root_path.stem not in file_dict:
-            file_dict[root_path.stem] = {}
-        for file_path in root_path.rglob('*'):
-            if file_path.is_file():
-                tasks.append(asyncio.create_task(process_files_in_thread(file_path)))
-                file_dict[root_path.stem][str(file_path.relative_to(root_path))] = file_path
-    results = await asyncio.gather(*tasks)
-    task_idx = 0
-    for path in path_list:
-        root_path = pathlib.Path(path)
-        for file_path in root_path.rglob('*'):
-            if file_path.is_file():
-                mime_type = results[task_idx]
-                if mime_type and "dng" not in mime_type:
-                    file_dict[root_path.stem][str(file_path.relative_to(root_path))] = [file_path, mime_type]
-                else:
-                    del file_dict[root_path.stem][str(file_path.relative_to(root_path))]
-                task_idx += 1
-
-    return file_dict
-
-
-async def generate_root_paths(root_path_list: list[str]):
+async def generate_root_paths(root_path_list: list[str], state: State):
     paths_list = []
     for path in root_path_list:
         root_path = pathlib.Path(path)
-        for subpath in root_path.iterdir():
-            paths_list.append(str(subpath))
-    return await generate_paths(paths_list)
-
-
-class Handler(FileSystemEventHandler):
-    def __init__(self, paths):
-        self.paths = paths
-
-    def on_modified(self, event):
-        print(f"Arquivo {event.src_path} foi modificado!")
-        self.paths.update(asyncio.run(generate_paths([event.src_path])))
-
-
-def start_observers(paths_strings, paths_dict):
-    observers = []
-    for path in paths_strings:
-        event_handler = Handler(paths_dict)
-        observer = Observer()
-        observer.schedule(event_handler, path=path, recursive=True)
-        observer.start()
-        observers.append(observer)
-    return observers
-
-
-def stop_observers(observers):
-    for observer in observers:
-        observer.stop()
-        observer.join()
-
-
-async def update_paths(logger, state: State):
-    logger.info("Start path cleaner.")
-
-    while True:
-        await asyncio.sleep(10)
-        logger.info("Updating paths.")
-        # logger.info(state.observers)
-        stop_observers(state.observers)
-        config = toml.load('config.toml')
-
-        state.paths = await generate_paths(config.get("paths"))
-        state.observers = start_observers(config.get("paths"), state.paths)
-
-        root_paths = config.get("root_paths")
-        if root_paths:
-            state.paths.update(await generate_root_paths(config.get("root_paths")))
-            state.observers.append(start_observers(config.get("root_paths"), state.paths))
-
-
-
-
-
-
+        paths_list.extend(str(subpath) for subpath in root_path.iterdir())
+    paths = await generate_paths(paths_list)
+    state.paths.update(paths)
 

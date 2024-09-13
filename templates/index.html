@@ -9,6 +9,8 @@
 </head>
 <body>
     <h1>Paths</h1>
+    <button id="update-button">Force update</button>
+
     {% for folder in paths %}
     <details class="dropdown">
         <summary role="button">
@@ -26,5 +28,10 @@
         </ul>
     </details>
     {% endfor %}
+    <script>
+        document.getElementById('update-button').addEventListener('click', function() {
+            window.location.href = "/update";
+        });
+    </script>
 </body>
 </html>
