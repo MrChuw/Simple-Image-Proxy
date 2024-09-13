@@ -1,16 +1,23 @@
 
 paths = [
-    "/path/to/folder/with/images/1",
-    "/path/to/folder/with/images/2",
-    "/path/to/folder/with/images/3",
-    "/path/to/folder/with/images/4",
+    "./exemple/images/1",
+    "./exemple/2",
+    "./exemple/3",
+    "./exemple/4",
+    "./exemple",
+    "./exemple/root_folder_exemple2/images_exemple2_1",
+    "./exemple/root_folder_exemple2/images_exemple2_2",
 ]
 
-
-
-
 root_paths = [
-    "/path/to/folder/with/images/"
+    "./exemple/root_folder/images1",
+    "./exemple/root_folder/images2",
+    "./exemple/root_folder/images3",
+    "./exemple/root_folder/images4",
+    "./exemple/root_folder/images5",
+    "./exemple/root_folder_exemple2/images_exemple2_3",
+    "./exemple/root_folder_exemple2/images_exemple2_4",
+    "./exemple/root_folder_exemple2/images_exemple2_5",
 ]
 
 
