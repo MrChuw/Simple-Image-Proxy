@@ -14,6 +14,19 @@ from fastapi.templating import Jinja2Templates
 from custom_logging import CustomizeLogger
 from utils import cleanup_routine, State, config_observer, start_paths, force_update
 import magic
+from tortoise.contrib.fastapi import register_tortoise
+
+
+
+
+# utilizar um sqlite para armazenar o hash, absolute path e o nome do arquivo
+# sendo o path e nome unicos juntos, e tbm armazenar a origem dele (se veio do path ou root_path das config e qual o
+# path da config), ao iniciar pela primeira vez se o banco de dados não existir fazer o hash e colocar,
+# se existir o banco de dados / nome e path armazenar para fazer depois e dar prioridade aos que não existem
+
+
+
+
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +48,11 @@ async def lifespan(app: FastAPI):  # NOQA
 
 
 app = FastAPI(lifespan=lifespan)
+
+# register_tortoise(app, db_url="sqlite://db.sqlite3", modules={"models": ["schemas"]}, generate_schemas=True,
+#                   add_exception_handlers=True
+#                   )
+
 app.logger = CustomizeLogger.make_logger(Path(__file__).with_name("logging_config.json"))
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -65,7 +83,7 @@ async def gallery(request: Request):
 
 
 @app.get("/path/{folder}", response_class=HTMLResponse)
-async def path_view(request: Request, folder: str):
+async def path_view(request: Request, folder: str):  # NOQA
     return templates.TemplateResponse("gallery.html", {"request": request})
 
 

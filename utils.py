@@ -2,8 +2,8 @@
 import asyncio
 import pathlib
 import toml
-import filetype
 import hashlib
+from pathlib import Path
 
 pathtype = dict[str, dict[str, pathlib.Path]]
 
@@ -28,29 +28,55 @@ class State:
         return await func(*args, **kwargs)
 
 
-async def generate_paths(path_list: list[str]):
-    file_dict: pathtype = {}
-
-    for path in path_list:
-        root_path = pathlib.Path(path)
-        if root_path.stem not in file_dict and not root_path.is_file():
-            file_dict[root_path.stem] = {}
-        if not root_path.is_file():
-            for file_path in root_path.rglob('*'):
-                if file_path.is_file():
-                    file_dict[root_path.stem][str(file_path.relative_to(root_path))] = file_path
+async def go_deeper(path: Path, folder: dict):
+    for item in path.iterdir():
+        if item.is_dir():
+            if item.name not in folder:
+                folder[item.name] = {}
+            await go_deeper(item, folder[item.name])
         else:
-            if root_path.parent.stem not in file_dict:
-                file_dict[root_path.parent.stem] = {}
-            file_dict[root_path.parent.stem][str(root_path.relative_to(root_path.parent))] = root_path
-    return file_dict
+            folder[item.name] = item
+
+    return {k: v for k, v in folder.items() if v}
+
+
+async def generate(dir_path: Path) -> dict:
+    if not dir_path.is_dir():
+        return {dir_path.name: dir_path}
+    temp_state = {}
+    for item in dir_path.iterdir():
+        if item.is_dir():
+            if item.name not in temp_state:
+                temp_state[item.name] = {}
+            await go_deeper(item, temp_state[item.name])
+        else:
+            temp_state[item.name] = item
+    return {k: v for k, v in temp_state.items() if v}
+
+
+async def generate_paths(paths: list[str], state):
+    for path in paths:
+        path = Path(path)
+        if path.name not in state.paths:
+            state.paths[path.name] = {}
+        temp_state = await generate(path)
+        if temp_state:
+            state.paths[path.name].update(temp_state)
+
+
+async def clean_root(state: State):
+    state_base = state.paths.copy()
+    for folder in state_base:
+        if not state.paths[folder]:
+            del state.paths[folder]
 
 
 async def force_update(state: State, config_path: pathlib.Path):
     config = toml.load(config_path)
-    state.paths = await generate_paths(config.get("paths"))
+    await generate_paths(config.get("paths"), state)
     if config.get("root_paths"):
         await generate_root_paths(config.get("root_paths"), state)
+    await clean_root(state)
 
 
 async def config_observer(logger, config: pathlib.Path, state):
@@ -74,33 +100,24 @@ async def cleanup_routine(logger, config_path: pathlib.Path, state: State):
 
         config = toml.load(config_path)
 
-        state.paths = await generate_paths(config.get("paths"))
+        await generate_paths(config.get("paths"), state)
         if config.get("root_paths"):
             await generate_root_paths(config.get("root_paths"), state)
+        await clean_root(state)
 
 
 async def start_paths(config: pathlib.Path, state: State):
     config = toml.load(config)
-    state.paths = await generate_paths(config.get("paths"))
+    await generate_paths(config.get("paths"), state)
     if config.get("root_paths"):
         await generate_root_paths(config.get("root_paths"), state)
-
-
-def process_file(file_path):
-    kind = filetype.guess(file_path)
-    return None if kind is None else str(kind.mime)
-
-
-async def process_files_in_thread(file_path):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, process_file, file_path)
+    await clean_root(state)
 
 
 async def generate_root_paths(root_path_list: list[str], state: State):
     paths_list = []
     for path in root_path_list:
-        root_path = pathlib.Path(path)
-        paths_list.extend(str(subpath) for subpath in root_path.iterdir())
-    paths = await generate_paths(paths_list)
-    state.paths.update(paths)
+        rootpath = Path(path)
+        paths_list.extend(str(subpath) for subpath in rootpath.iterdir())
+    await generate_paths(paths_list, state)
 
