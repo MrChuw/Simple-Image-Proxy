@@ -1,42 +1,29 @@
+import asyncio
 import logging
 import pathlib
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from textwrap import dedent
-from typing import Dict
-import asyncio
+
+import magic
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from custom_logging import CustomizeLogger
-from utils import cleanup_routine, State, config_observer, start_paths, force_update
-import magic
-from tortoise.contrib.fastapi import register_tortoise
-
-
-
-
-# utilizar um sqlite para armazenar o hash, absolute path e o nome do arquivo
-# sendo o path e nome unicos juntos, e tbm armazenar a origem dele (se veio do path ou root_path das config e qual o
-# path da config), ao iniciar pela primeira vez se o banco de dados não existir fazer o hash e colocar,
-# se existir o banco de dados / nome e path armazenar para fazer depois e dar prioridade aos que não existem
-
-
-
-
-
+from utils import cleanup_routine, config_observer, generate_table_html, start_paths, State
 
 logger = logging.getLogger(__name__)
 config_path = pathlib.Path("config.toml")
-connections: Dict[str, WebSocket] = {}
-state = State(5)
+connections = {}
+state = State(10, logger)
 
 
-def identify_file(file_path: pathlib.Path):
-    return magic.Magic(mime=True).from_file(str(file_path))
+def identify_file(file_path: str):
+    return magic.Magic(mime=True).from_file(file_path)
 
 
 @asynccontextmanager
@@ -48,10 +35,6 @@ async def lifespan(app: FastAPI):  # NOQA
 
 
 app = FastAPI(lifespan=lifespan)
-
-# register_tortoise(app, db_url="sqlite://db.sqlite3", modules={"models": ["schemas"]}, generate_schemas=True,
-#                   add_exception_handlers=True
-#                   )
 
 app.logger = CustomizeLogger.make_logger(Path(__file__).with_name("logging_config.json"))
 templates = Jinja2Templates(directory="templates")
@@ -68,53 +51,68 @@ async def get_robot():
     return dedent("""
     User-agent: *
     Disallow: /
-    """).lstrip("\n")
+    """
+                  ).lstrip("\n")
 
 
 @app.get("/update", response_class=RedirectResponse)
 async def update_paths():
-    await force_update(state, config_path)
+    await start_paths(config_path, state)
     return RedirectResponse("/")
 
 
 @app.get("/", response_class=HTMLResponse)
-async def gallery(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "paths": state.paths})
+async def index(request: Request):
+    dropdown = generate_table_html(state)
+    return templates.TemplateResponse("index.html", {"request": request, "table_rows": dropdown})
 
 
-@app.get("/path/{folder}", response_class=HTMLResponse)
-async def path_view(request: Request, folder: str):  # NOQA
+@app.get("/gallery/{folder}", response_class=HTMLResponse)
+async def gallery(request: Request, folder: str):  # NOQA
     return templates.TemplateResponse("gallery.html", {"request": request})
 
 
 @app.websocket("/ws/{folder}")
 async def websocket_endpoint(websocket: WebSocket, folder: str):
     await websocket.accept()
-    connections[folder] = websocket
+    client_id = str(uuid.uuid4())
+    connections[client_id] = websocket
     try:
-        if folder in state.paths:
-            for img_path in state.paths[folder]:
-                if mime := identify_file(state.paths[folder][img_path]):
+        root_folder = state.root_folder_files.get(folder)
+        recursive_folder = state.recursive_folders.get(folder)
+        if root_folder or recursive_folder:
+            folder_files = root_folder or recursive_folder
+            for file in folder_files:
+                if mime := identify_file(str(file.resolve())):
                     if "text" not in mime:
-                        await websocket.send_text(f"/{folder}/{img_path}\t{mime}\n")
+                        await asyncio.sleep(0.5)
+                        await websocket.send_text(f"{file.resolve()}\t{mime}\n")
+
     except WebSocketDisconnect:
-        del connections[folder]
+        del connections[client_id]
 
 
 @app.get("/{folder_str}/{path_str:path}", response_class=HTMLResponse)
-@app.get("/path/{folder_str}/{path_str:path}", response_class=RedirectResponse)
 async def get_files(request: Request, folder_str: str, path_str: str):
-    folder = state.paths.get(folder_str)
+    folder = state.root_folder_files.get(folder_str) or state.recursive_folders.get(folder_str)
     if not folder:
-        raise HTTPException(status_code=404, detail="Folder dont exist.")
+        files = state.find_files(request.url.path.split("/")[-1])
+        if files:
+            return StreamingResponse(files[0].open("rb"), media_type=identify_file(str(files[0].resolve())))
+        raise HTTPException(status_code=404, detail="Folder does not exist.")
 
-    file = folder.get(path_str)
-    if not file:
-        raise HTTPException(status_code=404, detail="File dont exist.")
-    elif "/path/" in request.url.path:
-        return RedirectResponse(f"/{folder_str}/{path_str}")
-    elif file.exists():
-        return StreamingResponse(file.open("rb"), media_type=identify_file(file))
+    files = state.find_files(path_str)
+    if not files:
+        raise HTTPException(status_code=404, detail="File does not exist.")
+    if len(files) > 1:
+        files_html = "\n".join([
+                f"""<li><a href='{file.resolve()}'>
+                <img src=\"{str(request.base_url)}{str(file.resolve()).replace("/", "", 1)}\" style=\"width: 200;\">
+                </a></li>""" for file in files])
+        return HTMLResponse(f"<p>More than one file found with name \"{path_str}\".</p><ul>{files_html}</ul>")
+    file = files[0]
+    if file.exists():
+        return RedirectResponse(str(file.resolve()))
     else:
         raise HTTPException(status_code=404, detail="File or folder deleted since last time I checked.")
 
